@@ -1,6 +1,8 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from torchvision import models, transforms
+from PIL import Image
 import os
 
 class EnsembleVeterinario(nn.Module):
@@ -35,3 +37,36 @@ def get_transformacao():
         transforms.ToTensor(), 
         transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
     ])
+
+def prever_diagnostico(caminho_imagem):
+    """
+    Carrega a imagem, aplica as transformações e passa pelo Ensemble.
+    Retorna a classe prevista e a confiança (0 a 100).
+    """
+    modelo, device, nomes_das_classes = carregar_modelo_ia()
+    
+    if modelo is None:
+        return "Erro: Arquivo .pth não encontrado", 0.0
+        
+    transformacao = get_transformacao()
+    
+    try:
+        # Abre a imagem e converte para RGB (evita quebrar com PNGs transparentes)
+        imagem = Image.open(caminho_imagem).convert('RGB')
+        
+        # Aplica resize/normalize e adiciona a dimensão do lote (batch dimension)
+        imagem_tensor = transformacao(imagem).unsqueeze(0).to(device)
+        
+        # Faz a inferência sem calcular gradientes (economiza memória/CPU)
+        with torch.no_grad():
+            saida = modelo(imagem_tensor)
+            probabilidades = F.softmax(saida, dim=1) # Converte os logits em porcentagens
+            confianca, classe_idx = torch.max(probabilidades, 1)
+            
+        diagnostico = nomes_das_classes[classe_idx.item()]
+        porcentagem = confianca.item() * 100.0
+        
+        return diagnostico, porcentagem
+        
+    except Exception as e:
+        return f"Erro na leitura da imagem: {e}", 0.0
