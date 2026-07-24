@@ -58,4 +58,4 @@ def gerar_laudo_pdf(caminho_imagem, nome_animal, especie, idade, nome_tutor, dia
     pdf.multi_cell(0, 5, txt=aviso)
     
     # Retorna o ficheiro em formato de bytes para o Streamlit processar o download
-    return pdf.output(dest="S")
+    return bytes(pdf.output())
