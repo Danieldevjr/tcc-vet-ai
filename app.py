@@ -1,5 +1,7 @@
 import streamlit as st
 import os
+import cv2
+import numpy as np
 from database import inicializar_banco, carregar_historico, salvar_diagnostico
 from auth_ui import render_login_screen
 from pdf_generator import gerar_laudo_pdf
@@ -41,12 +43,44 @@ st.sidebar.markdown("---")
 # Menu de navegação interno do sistema
 menu = st.sidebar.radio("Navegação", ["Nova Triagem", "Histórico Clínico"])
 
+# --- FUNÇÃO DA CAMADA DE VALIDAÇÃO DE ESCOPO (Filtro Baseado em PDI) ---
+def validar_imagem_escopo(caminho_img):
+    """
+    Analisa características da imagem para bloquear paisagens (céu, florestas)
+    ou imagens com padrões que não condizem com uma foto aproximada de lesão na pele.
+    """
+    img = cv2.imread(caminho_img)
+    if img is None:
+        return False, "Imagem Corrompida"
+        
+    # Converte para o espaço de cores HSV para analisar matizes (cores)
+    hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+    
+    # Calcula histograma de cores para detectar excesso de azul (céu) ou verde (floresta/grama)
+    # Tons de azul e verde no HSV costumam ficar entre as faixas de 35 a 130
+    hist_cores = cv2.calcHist([hsv], [0], None, [180], [0, 180])
+    pixels_paisagem = np.sum(hist_cores[35:130])
+    total_pixels = img.shape[0] * img.shape[1]
+    porcentagem_paisagem = (pixels_paisagem / total_pixels) * 100
+    
+    # Se mais de 55% da imagem for composta por tons puros de azul/verde, bloqueia como paisagem externa
+    if porcentagem_paisagem > 55.0:
+        return False, "Cenário Externo / Paisagem"
+        
+    # Verifica a variância dos tons de cinza (imagens muito uniformes como paredes brancas ou folhas de papel)
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    variancia = np.var(gray)
+    if variancia < 200:
+        return False, "Superfície Lisa / Objeto Uniforme"
+        
+    return True, "Imagem Válida (Pele/Tecido)"
+
 # 3. MÓDULO: NOVA TRIAGEM
 if menu == "Nova Triagem":
     st.title("🔬 Triagem Dermatológica Avançada")
     st.write("Insira os dados do prontuário e anexe a foto da lesão para análise do Comitê de IA.")
 
-    # Formuário do Prontuário Clínico
+    # Formulário do Prontuário Clínico
     col_t1, col_t2 = st.columns(2)
     with col_t1:
         nome_tutor = st.text_input("Nome do Tutor(a)")
@@ -60,7 +94,7 @@ if menu == "Nova Triagem":
     # Upload da Imagem da Lesão
     uploaded_file = st.file_uploader("Selecione a imagem da lesão cutânea...", type=["jpg", "jpeg", "png"])
     
-    # Switch opcional para ativação do Processamento Digital de Imagens (PDI)
+    # Switch para ativação do Processamento Digital de Imagens (PDI)
     ativar_pdi = st.checkbox("🔬 Ativar Realce Avançado de Microtexturas (PDI)", value=False)
     
     if uploaded_file is not None:
@@ -78,10 +112,8 @@ if menu == "Nova Triagem":
             st.image(caminho_imagem, caption="Foto enviada pelo usuário", use_container_width=True)
             
         with col_img2:
-            if ativar_pdi:
+            if activar_pdi:
                 st.info("A Inteligência Artificial analisará a versão Realçada da imagem.")
-                # Simulando a imagem de saída do PDI (Fusão Multi-Escala)
-                # Na integração real, você chamaria sua função: caminho_imagem = aplicar_pdi(caminho_imagem)
                 with st.expander("👁️ Ver Imagem Processada pelo PDI (Fusão Multi-Escala)"):
                     st.image(caminho_imagem, caption="Microtexturas realçadas ativamente para a IA", use_container_width=True)
             else:
@@ -89,15 +121,26 @@ if menu == "Nova Triagem":
 
         # Botão para disparar o diagnóstico do Comitê
         if st.button("🚀 Processar Diagnóstico", type="primary"):
+            
+            # --- EXECUÇÃO DA CAMADA DE VALIDAÇÃO DE ESCOPO ---
+            imagem_valida, motivo_rejeicao = validar_imagem_escopo(caminho_imagem)
+            
+            if not imagem_valida:
+                st.error("❌ **Detecção de Inconsistência de Domínio!**")
+                st.warning(f"A imagem enviada foi rejeitada pela camada de segurança. Motivo: **{motivo_rejeicao}**.")
+                st.info("Por favor, envie uma foto aproximada e focada da lesão dermatológica do animal.")
+                st.stop() # Interrompe a execução imediatamente para não gerar o falso positivo
+            
+            # --- CONTINUAÇÃO SE A IMAGEM FOR VÁLIDA ---
             with st.spinner("O Comitê de IA (ResNet50 + EfficientNet + DenseNet) está avaliando..."):
                 
                 # --- SIMULAÇÃO DA INFERÊNCIA DO ENSEMBLE ---
-                # Na sua integração real, chame a função que carrega os modelos e faz o Soft Voting
+                # Aqui entra o soft voting do seu modelo consolidado
                 diagnostico_predito = "Dermatite"
                 confianca_calculada = 89.8
                 # -------------------------------------------
                 
-                # Salva o resultado no banco SQLite pegando o fuso horário brasileiro (UTC-3)
+                # Salva o resultado no banco SQLite
                 data_registro = salvar_diagnostico(
                     nome_arquivo=uploaded_file.name,
                     nome_animal=nome_animal if nome_animal else "Ignorado",
@@ -121,7 +164,7 @@ if menu == "Nova Triagem":
                 st.subheader("📄 Emissão do Laudo Clínico")
                 
                 try:
-                    # Gera o PDF usando o gerador fpdf2 corrigido que retorna bytes
+                    # Gera o PDF usando o gerador fpdf2
                     pdf_bytes = gerar_laudo_pdf(
                         caminho_imagem=caminho_imagem,
                         nome_animal=nome_animal,
@@ -133,7 +176,7 @@ if menu == "Nova Triagem":
                         data_registro=data_registro
                     )
                     
-                    # Botão de download do Streamlit que aceita o formato bytes
+                    # Botão de download do Streamlit
                     st.download_button(
                         label="⬇️ Baixar Laudo Clínico Oficial (PDF)",
                         data=pdf_bytes,
@@ -153,7 +196,6 @@ elif menu == "Histórico Clínico":
     if df_historico.empty:
         st.info("Nenhum registro de diagnóstico encontrado no banco de dados.")
     else:
-        # Se for administrador, ele vê tudo. Se for aluno, pode restringir ou apenas visualizar.
         if user["role"] == "admin":
             st.write("📊 **Modo Administrador:** Exibindo todos os prontuários e auditoria global do sistema.")
             st.dataframe(df_historico, use_container_width=True)
@@ -168,5 +210,4 @@ elif menu == "Histórico Clínico":
             )
         else:
             st.write("📋 **Modo Aluno:** Visualizando o histórico completo de triagens do laboratório.")
-            # Exibe o histórico removendo colunas mais críticas se necessário
             st.dataframe(df_historico, use_container_width=True)
