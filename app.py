@@ -112,7 +112,7 @@ if menu == "Nova Triagem":
             st.image(caminho_imagem, caption="Foto enviada pelo usuário", use_container_width=True)
             
         with col_img2:
-            if activar_pdi:
+            if ativar_pdi:
                 st.info("A Inteligência Artificial analisará a versão Realçada da imagem.")
                 with st.expander("👁️ Ver Imagem Processada pelo PDI (Fusão Multi-Escala)"):
                     st.image(caminho_imagem, caption="Microtexturas realçadas ativamente para a IA", use_container_width=True)
