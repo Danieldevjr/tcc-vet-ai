@@ -84,3 +84,4 @@ def autenticar_usuario(email, senha):
     if user:
         return {"id": user[0], "nome": user[1], "email": user[2], "role": user[3]}
     return None
+#forçado envio data baseS
