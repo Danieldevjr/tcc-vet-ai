@@ -131,16 +131,21 @@ if menu == "Nova Triagem":
                 st.info("Por favor, envie uma foto aproximada e focada da lesão dermatológica do animal.")
                 st.stop() # Interrompe a execução imediatamente para não gerar o falso positivo
             
-            # --- CONTINUAÇÃO SE A IMAGEM FOR VÁLIDA ---
+            # --- INFERÊNCIA REAL COM O SEU MODELO ENSEMBLE ---
             with st.spinner("O Comitê de IA (ResNet50 + EfficientNet + DenseNet) está avaliando..."):
                 
-                # --- SIMULAÇÃO DA INFERÊNCIA DO ENSEMBLE ---
-                # Aqui entra o soft voting do seu modelo consolidado
-                diagnostico_predito = "Dermatite"
-                confianca_calculada = 89.8
-                # -------------------------------------------
+                # Importa a tua função real de IA do arquivo ai_model.py
+                from ai_model import prever_diagnostico
                 
-                # Salva o resultado no banco SQLite
+                # Executa a inferência real usando o PyTorch
+                diagnostico_predito, confianca_calculada = prever_diagnostico(caminho_imagem)
+                
+                # Caso ocorra um erro de carregamento do arquivo .pth
+                if "Erro" in diagnostico_predito:
+                    st.error(diagnostico_predito)
+                    st.stop()
+                
+                # Salva o resultado real no banco SQLite
                 data_registro = salvar_diagnostico(
                     nome_arquivo=uploaded_file.name,
                     nome_animal=nome_animal if nome_animal else "Ignorado",
