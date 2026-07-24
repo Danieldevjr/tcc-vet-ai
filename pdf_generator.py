@@ -1,48 +1,61 @@
 from fpdf import FPDF
+import datetime
 
-def gerar_laudo_pdf(imagem_path, nome_animal, especie, idade, nome_tutor, diagnostico, confianca, data_hora):
+def gerar_laudo_pdf(caminho_imagem, nome_animal, especie, idade, nome_tutor, diagnostico, confianca, data_registro):
+    # Inicializa o PDF
     pdf = FPDF()
     pdf.add_page()
     
-    # Cabeçalho do Sistema
-    pdf.set_font("helvetica", 'B', 16)
-    pdf.set_text_color(20, 184, 166)
-    pdf.cell(0, 10, "VET.AI - LAUDO DE TRIAGEM DERMATOLOGICA", ln=True, align='C')
-    pdf.set_font("helvetica", 'I', 10)
-    pdf.set_text_color(100, 100, 100)
-    pdf.cell(0, 5, "Relatorio Preditivo Multimodelo (Ensemble Learning)", ln=True, align='C')
+    # Configura a margem e a fonte padrão (usando fontes nativas que não exigem ficheiros externos)
+    pdf.set_margins(20, 20, 20)
+    
+    # Cabeçalho do Hospital / Clínica
+    pdf.set_font("Helvetica", style="B", size=18)
+    pdf.cell(0, 10, txt="Hospital Veterinário - Vet.AI", ln=True, align="C")
+    
+    pdf.set_font("Helvetica", size=12)
+    pdf.cell(0, 10, txt="Laudo de Triagem Dermatológica Avançada", ln=True, align="C")
     pdf.ln(10)
     
-    # Seção 1: Dados do Prontuário Clínico
-    pdf.set_text_color(0, 0, 0)
-    pdf.set_font("helvetica", 'B', 12)
-    pdf.cell(0, 10, "1. IDENTIFICACAO DO PACIENTE E TUTOR", ln=True)
-    pdf.set_font("helvetica", '', 11)
-    pdf.cell(0, 6, f"Nome do Animal: {nome_animal}", ln=True)
-    pdf.cell(0, 6, f"Especie: {especie}", ln=True)
-    pdf.cell(0, 6, f"Idade: {idade} ano(s)", ln=True)
-    pdf.cell(0, 6, f"Tutor(a): {nome_tutor}", ln=True)
-    pdf.cell(0, 6, f"Data e Hora da Triagem: {data_hora}", ln=True)
+    # Dados do Prontuário
+    pdf.set_font("Helvetica", style="B", size=14)
+    pdf.cell(0, 10, txt="Prontuário do Paciente", ln=True)
+    
+    pdf.set_font("Helvetica", size=12)
+    pdf.cell(0, 8, txt=f"Data da Triagem: {data_registro}", ln=True)
+    pdf.cell(0, 8, txt=f"Tutor(a): {nome_tutor}", ln=True)
+    pdf.cell(0, 8, txt=f"Paciente: {nome_animal}", ln=True)
+    pdf.cell(0, 8, txt=f"Espécie: {especie}", ln=True)
+    pdf.cell(0, 8, txt=f"Idade: {idade} anos", ln=True)
+    pdf.ln(10)
+    
+    # Resultados da Inteligência Artificial
+    pdf.set_font("Helvetica", style="B", size=14)
+    pdf.cell(0, 10, txt="Resultado da Análise (Comitê de IA)", ln=True)
+    
+    pdf.set_font("Helvetica", size=12)
+    pdf.cell(0, 8, txt=f"Diagnóstico Preditivo: {diagnostico}", ln=True)
+    pdf.cell(0, 8, txt=f"Nível de Confiança: {confianca:.1f}%", ln=True)
+    pdf.ln(10)
+    
+    # Inserir Imagem (Realçada ou Original)
+    pdf.set_font("Helvetica", style="B", size=14)
+    pdf.cell(0, 10, txt="Registo Fotográfico Analisado:", ln=True)
     pdf.ln(5)
     
-    # Seção 2: Registro Fotográfico
-    pdf.set_font("helvetica", 'B', 12)
-    pdf.cell(0, 10, "2. REGISTRO FOTOGRAFICO DA LESAO", ln=True)
-    pdf.image(imagem_path, x=10, y=pdf.get_y(), w=90) 
-    pdf.ln(100) # Espaço para a imagem não sobrepor o texto
-    
-    # Seção 3: Resultado da IA
-    pdf.set_font("helvetica", 'B', 12)
-    pdf.cell(0, 10, "3. ANALISE E DIAGNOSTICO PREDITIVO", ln=True)
-    pdf.set_font("helvetica", '', 11)
-    pdf.cell(0, 6, f"Arquitetura: Comite Ensemble (ResNet50 + EffNet-B0 + DenseNet121)", ln=True)
-    pdf.cell(0, 6, f"Patologia Preditada: {diagnostico}", ln=True)
-    pdf.cell(0, 6, f"Grau de Confianca do Comite: {confianca:.2f}%", ln=True)
+    try:
+        # A biblioteca fpdf2 lida melhor com as imagens
+        pdf.image(caminho_imagem, x=20, w=170)
+    except Exception as e:
+        pdf.set_font("Helvetica", size=10)
+        pdf.cell(0, 10, txt=f"[Erro ao carregar a imagem no documento: {e}]", ln=True)
+        
+    pdf.ln(20)
     
     # Rodapé Legal
-    pdf.ln(15)
-    pdf.set_font("helvetica", 'I', 9)
-    pdf.set_text_color(150, 150, 150)
-    pdf.multi_cell(0, 5, "AVISO LEGAL: Este laudo foi gerado de forma automatizada por Inteligencia Artificial como suporte clinico. Nao substitui de forma alguma a avaliacao presencial conduzida por um Medico Veterinario.")
+    pdf.set_font("Helvetica", style="I", size=10)
+    aviso = "Aviso: Este laudo é um documento de triagem emitido por Inteligência Artificial (Projeto TADS) e não substitui a avaliação clínica presencial de um Médico Veterinário."
+    pdf.multi_cell(0, 5, txt=aviso)
     
-    return bytes(pdf.output())
+    # Retorna o ficheiro em formato de bytes para o Streamlit processar o download
+    return pdf.output(dest="S")
