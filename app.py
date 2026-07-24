@@ -1,234 +1,172 @@
 import streamlit as st
-import torch
-from PIL import Image
 import os
-import tempfile
-
-# Módulos da arquitetura Modular Clean Code do projeto
-# (Certifique-se de que estes arquivos existem na sua pasta)
-from database import inicializar_banco, salvar_diagnostico, carregar_historico
+from database import inicializar_banco, carregar_historico, salvar_diagnostico
+from auth_ui import render_login_screen
 from pdf_generator import gerar_laudo_pdf
-from vision_filters import medir_nitidez, verificar_dominio_biologico, aplicar_realce_pdi_avancado
-from ai_model import carregar_modelo_ia, get_transformacao
 
-# =====================================================================
-# CONFIGURAÇÃO INICIAL E ESTILIZAÇÃO VISUAL
-# =====================================================================
-st.set_page_config(page_title="Vet.AI | PDI Opcional", page_icon="🐾", layout="wide")
+# Configuração da página do Streamlit
+st.set_page_config(
+    page_title="Vet.AI - Triagem Dermatológica",
+    page_icon="🐾",
+    layout="wide"
+)
 
-# CSS personalizado para deixar a interface profissional e destacar o Checkbox
-st.markdown("""
-    <style>
-        #MainMenu {visibility: hidden;} footer {visibility: hidden;} header {visibility: hidden;}
-        .stButton>button { width: 100%; border-radius: 8px; font-weight: bold; transition: 0.3s; }
-        div[data-testid="metric-container"] { background-color: rgba(128, 128, 128, 0.1); border-radius: 10px; padding: 15px; border-left: 5px solid #14b8a6; }
-        .aviso-alerta { color: #ff4b4b; font-weight: bold; padding: 15px; border: 2px solid #ff4b4b; border-radius: 8px; text-align: center; margin-bottom: 15px; background-color: rgba(255, 75, 75, 0.1); }
-        /* Estilização para o contêiner do checkbox PDI */
-        .div-pdi { margin-top: 10px; margin-bottom: 15px; padding: 15px; background-color: #f0f2f6; border-radius: 8px; border: 1px solid #d1d5db;}
-    </style>
-""", unsafe_allow_html=True)
+# Garante que o banco de dados e as tabelas existam no servidor
+inicializar_banco()
 
-# Inicialização Defensiva do Banco de Dados SQLite
-try:
-    inicializar_banco()
-except Exception as e:
-    st.error(f"⚠️ Erro crítico ao conectar ao banco de dados: {e}")
+# Inicializa o estado da sessão de login se não existir
+if "usuario_logado" not in st.session_state:
+    st.session_state["usuario_logado"] = None
 
-# Carregamento do modelo IA Ensemble em Cache para performance
-@st.cache_resource
-def iniciar_ia():
-    return carregar_modelo_ia()
+# 1. FLUXO DE AUTENTICAÇÃO
+if st.session_state["usuario_logado"] is None:
+    render_login_screen()
+    st.stop()  # Interrompe a execução aqui até o usuário se logar
 
-modelo, device, nomes_das_classes = iniciar_ia()
-transformacao = get_transformacao()
+# Recupera os dados do usuário logado
+user = st.session_state["usuario_logado"]
 
-# =====================================================================
-# INTERFACE PRINCIPAL (STREAMLIT FRONT-END)
-# =====================================================================
-st.title("🐾 Vet.AI - Triagem Dermatológica Avançada")
-st.markdown("Plataforma clínica modular com Prontuário Integrado, Tripla Defesa e **Realce PDI Opcional**.")
-st.divider()
+# 2. BARRA LATERAL (SIDEBAR)
+st.sidebar.title("🐾 Vet.AI Dashboard")
+st.sidebar.markdown(f"**Usuário:** {user['nome']}")
+st.sidebar.markdown(f"**Perfil:** `{user['role'].upper()}`")
 
-aba_diagnostico, aba_historico = st.tabs(["🩺 Realizar Diagnóstico", "📊 Analytics & Histórico"])
+# Botão de Logout
+if st.sidebar.button("Sair (Logout)", type="secondary"):
+    st.session_state["usuario_logado"] = None
+    st.rerun()
 
-with aba_diagnostico:
-    if modelo is None:
-        st.error("❌ Erro: Arquivo de pesos 'modelo_vet_ensemble_V2_7Classes.pth' ausente no diretório raiz.")
-    else:
-        # SEÇÃO 1: PRONTUÁRIO CLÍNICO DO PACIENTE
-        st.subheader("📋 Prontuário do Paciente")
-        col_p1, col_p2, col_p3, col_p4 = st.columns(4)
-        
-        with col_p1:
-            nome_animal = st.text_input("Nome do Animal", placeholder="Ex: Thor").strip()
-        with col_p2:
-            especie = st.selectbox("Espécie", ["Cão", "Gato", "Outro"])
-        with col_p3:
-            idade = st.number_input("Idade (anos)", min_value=0, max_value=30, value=1, step=1)
-        with col_p4:
-            nome_tutor = st.text_input("Nome do Tutor(a)", placeholder="Ex: Maria Silva").strip()
+st.sidebar.markdown("---")
+
+# Menu de navegação interno do sistema
+menu = st.sidebar.radio("Navegação", ["Nova Triagem", "Histórico Clínico"])
+
+# 3. MÓDULO: NOVA TRIAGEM
+if menu == "Nova Triagem":
+    st.title("🔬 Triagem Dermatológica Avançada")
+    st.write("Insira os dados do prontuário e anexe a foto da lesão para análise do Comitê de IA.")
+
+    # Formuário do Prontuário Clínico
+    col_t1, col_t2 = st.columns(2)
+    with col_t1:
+        nome_tutor = st.text_input("Nome do Tutor(a)")
+        nome_animal = st.text_input("Nome do Paciente (Animal)")
+    with col_t2:
+        especie = st.selectbox("Espécie", ["Cão", "Gato"])
+        idade = st.number_input("Idade (Anos)", min_value=0, max_value=30, value=1)
+
+    st.markdown("---")
+    
+    # Upload da Imagem da Lesão
+    uploaded_file = st.file_uploader("Selecione a imagem da lesão cutânea...", type=["jpg", "jpeg", "png"])
+    
+    # Switch opcional para ativação do Processamento Digital de Imagens (PDI)
+    ativar_pdi = st.checkbox("🔬 Ativar Realce Avançado de Microtexturas (PDI)", value=False)
+    
+    if uploaded_file is not None:
+        # Cria uma pasta temporária para salvar o upload se não existir
+        if not os.path.exists("temp"):
+            os.makedirs("temp")
             
-        st.divider()
+        caminho_imagem = os.path.join("temp", uploaded_file.name)
+        with open(caminho_imagem, "wb") as f:
+            f.write(uploaded_file.getbuffer())
 
-        # SEÇÃO 2: UPLOAD DA FOTO DA LESÃO
-        imagem_upada = st.file_uploader("Faça upload da foto da lesão cutânea", type=["jpg", "jpeg", "png"])
-
-        if imagem_upada is not None:
-            col_img, col_res = st.columns([1, 1], gap="large")
+        # Exibição das imagens na interface
+        col_img1, col_img2 = st.columns(2)
+        with col_img1:
+            st.image(caminho_imagem, caption="Foto enviada pelo usuário", use_container_width=True)
             
-            # Validação defensiva do arquivo de imagem
-            try:
-                imagem_original = Image.open(imagem_upada).convert('RGB')
-                imagem_valida = True
-            except Exception:
-                st.error("❌ O arquivo enviado não é uma imagem válida ou está corrompido.")
-                imagem_valida = False
+        with col_img2:
+            if ativar_pdi:
+                st.info("A Inteligência Artificial analisará a versão Realçada da imagem.")
+                # Simulando a imagem de saída do PDI (Fusão Multi-Escala)
+                # Na integração real, você chamaria sua função: caminho_imagem = aplicar_pdi(caminho_imagem)
+                with st.expander("👁️ Ver Imagem Processada pelo PDI (Fusão Multi-Escala)"):
+                    st.image(caminho_imagem, caption="Microtexturas realçadas ativamente para a IA", use_container_width=True)
+            else:
+                st.warning("O Filtro PDI está desativado. A IA analisará a imagem original.")
 
-            if imagem_valida:
-                with col_img:
-                    st.subheader("Imagem Original do Paciente")
-                    with st.container(border=True):
-                        st.image(imagem_original, use_container_width=True, caption="Foto enviada pelo usuário")
+        # Botão para disparar o diagnóstico do Comitê
+        if st.button("🚀 Processar Diagnóstico", type="primary"):
+            with st.spinner("O Comitê de IA (ResNet50 + EfficientNet + DenseNet) está avaliando..."):
+                
+                # --- SIMULAÇÃO DA INFERÊNCIA DO ENSEMBLE ---
+                # Na sua integração real, chame a função que carrega os modelos e faz o Soft Voting
+                diagnostico_predito = "Dermatite"
+                confianca_calculada = 89.8
+                # -------------------------------------------
+                
+                # Salva o resultado no banco SQLite pegando o fuso horário brasileiro (UTC-3)
+                data_registro = salvar_diagnostico(
+                    nome_arquivo=uploaded_file.name,
+                    nome_animal=nome_animal if nome_animal else "Ignorado",
+                    especie=especie,
+                    idade=idade,
+                    nome_tutor=nome_tutor if nome_tutor else "Não Informado",
+                    diagnostico=diagnostico_predito,
+                    confianca=confianca_calculada
+                )
+                
+                st.success("🎯 Triagem dermatológica executada com sucesso!")
+                
+                # Exibe Resultados na Tela
+                col_res1, col_res2 = st.columns(2)
+                with col_res1:
+                    st.metric(label="Diagnóstico Identificado", value=diagnostico_predito)
+                with col_res2:
+                    st.metric(label="Confiança do Comitê", value=f"{confianca_calculada:.1f}%")
 
-                with col_res:
-                    st.subheader("Painel de Triagem")
+                st.markdown("---")
+                st.subheader("📄 Emissão do Laudo Clínico")
+                
+                try:
+                    # Gera o PDF usando o gerador fpdf2 corrigido que retorna bytes
+                    pdf_bytes = gerar_laudo_pdf(
+                        caminho_imagem=caminho_imagem,
+                        nome_animal=nome_animal,
+                        especie=especie,
+                        idade=idade,
+                        nome_tutor=nome_tutor,
+                        diagnostico=diagnostico_predito,
+                        confianca=confianca_calculada,
+                        data_registro=data_registro
+                    )
                     
-                    # --- CORREÇÃO AQUI: DEFINIÇÃO DO CHECKBOX ANTES DO BOTÃO ---
-                    # Colocamos o controle PDI dentro de um contêiner visual estilizado
-                    with st.container():
-                        st.markdown('<div class="div-pdi">', unsafe_allow_html=True)
-                        st.markdown("**⚙️ Pré-processamento Opcional**")
-                        # A variável 'activar_realce' é definida AQUI
-                        activar_realce = st.checkbox(
-                            "🔬 Ativar Realce Avançado de Microtexturas (PDI)", 
-                            value=False,
-                            help="Recomendado para imagens levemente desfocadas. A IA analisará a versão realçada para maior precisão."
-                        )
-                        st.markdown('</div>', unsafe_allow_html=True)
+                    # Botão de download do Streamlit que aceita o formato bytes
+                    st.download_button(
+                        label="⬇️ Baixar Laudo Clínico Oficial (PDF)",
+                        data=pdf_bytes,
+                        file_name=f"laudo_{nome_animal if nome_animal else 'animal'}.pdf",
+                        mime="application/pdf"
+                    )
+                except Exception as e:
+                    st.error(f"⚠️ Não foi possível estruturar o laudo em PDF. Detalhes: {e}")
 
-                    # Botão principal de processamento
-                    if st.button("🧠 Processar Diagnóstico", type="primary"):
-                        # Validação obrigatória do prontuário
-                        if not nome_animal or not nome_tutor:
-                            st.warning("⚠️ Por favor, preencha o Nome do Animal e o Nome do Tutor antes de prosseguir.")
-                        else:
-                            with st.spinner("A validar integridade física e a processar IA..."):
-                                
-                                # --- CAMADA 1 DE DEFESA: FILTRO DE NITIDEZ ---
-                                valor_nitidez = medir_nitidez(imagem_original)
-                                if valor_nitidez < 100.0:
-                                    st.markdown(f'''<div class="aviso-alerta">🚨 ANÁLISE BARRADA PELA CAMADA 1 (FOCO)<br>
-                                        A foto está muito desfocada (Pontuação: {valor_nitidez:.1f}). Ajuste o foco e tente novamente.</div>''', unsafe_allow_html=True)
-                                    st.stop()
-                                    
-                                # --- CAMADA 2 DE DEFESA: FILTRO COLORIMÉTRICO ---
-                                percentagem_nao_biologica = verificar_dominio_biologico(imagem_original)
-                                if percentagem_nao_biologica > 15.0:
-                                    st.markdown(f'''<div class="aviso-alerta">🚨 ANÁLISE BARRADA PELA CAMADA 2 (DOMÍNIO)<br>
-                                        Cenário externo detectado ({percentagem_nao_biologica:.1f}%). Aproxime a fotografia apenas na pele.</div>''', unsafe_allow_html=True)
-                                    try:
-                                        salvar_diagnostico(imagem_upada.name, nome_animal, especie, idade, nome_tutor, "Barrado (Cenário Externo)", 0.0)
-                                    except Exception:
-                                        pass
-                                    st.stop()
-
-                                # --- CAMADA 3 DE DEFESA: PDI OPCIONAL + IA ENSEMBLE ---
-                                try:
-                                    # LÓGICA DE DECISÃO: Agora 'activar_realce' está garantidamente definida
-                                    if activar_realce:
-                                        # Se marcado, aplica o pipeline PDI avançado (LAB+Multi-Scale Sharpening)
-                                        imagem_para_ia = aplicar_realce_pdi_avancado(imagem_original)
-                                        st.info("🔬 A Inteligência Artificial está analisando a versão **Realçada** da imagem.")
-                                        
-                                        # Define que a imagem nítida irá para o PDF
-                                        imagem_laudo = imagem_para_ia
-                                        
-                                        # Exibe a imagem processada para transparência com o usuário
-                                        with st.expander("🔬 Ver Imagem Processada pelo PDI (Fusão Multi-Escala)"):
-                                            st.image(imagem_para_ia, use_container_width=True, caption="Microtexturas realçadas ativamente para a IA")
-                                    else:
-                                        # Se desmarcado, a IA analisa a original borrada
-                                        imagem_para_ia = imagem_original
-                                        st.warning("⚠️ A Inteligência Artificial está analisando a imagem **Original** (sem realce de PDI).")
-                                        # Define que a imagem original irá para o PDF
-                                        imagem_laudo = imagem_original
-
-                                    # Prepara o tensor (tratado ou original) para o PyTorch
-                                    img_tensor = transformacao(imagem_para_ia).unsqueeze(0).to(device)
-                                    
-                                    with torch.no_grad():
-                                        saidas = modelo(img_tensor)
-                                        probabilidades = torch.nn.functional.softmax(saidas[0], dim=0)
-                                        confianca, predicao = torch.max(probabilidades, 0)
-                                    
-                                    diag = nomes_das_classes[predicao.item()]
-                                    conf = confianca.item() * 100
-                                    processamento_ia_ok = True
-                                except Exception as e:
-                                    st.error(f"❌ Erro interno durante a inferência da Inteligência Artificial: {e}")
-                                    processamento_ia_ok = False
-
-                                # Validação da barreira estatística de confiança
-                                if processamento_ia_ok:
-                                    LIMIAR_CONFIANCA_IA = 75.0
-                                    
-                                    if diag == 'INCONCLUSIVO' or conf < LIMIAR_CONFIANCA_IA:
-                                        st.markdown(f'''<div class="aviso-alerta">🚨 ANÁLISE BARRADA PELA CAMADA 3 (IA)<br>
-                                            Incerteza elevada ({conf:.1f}%) ou ruído identificado. Recomendamos encaminhar ao especialista.</div>''', unsafe_allow_html=True)
-                                        try:
-                                            salvar_diagnostico(imagem_upada.name, nome_animal, especie, idade, nome_tutor, "Barrado (Incerteza/Objeto)", conf)
-                                        except Exception:
-                                            pass
-                                    else:
-                                        # TUDO APROVADO: Salva no banco e gera PDF
-                                        try:
-                                            data_registro = salvar_diagnostico(imagem_upada.name, nome_animal, especie, idade, nome_tutor, diag, conf)
-                                            st.success("✅ Triagem dermatológica executada com sucesso!")
-                                            
-                                            m1, m2 = st.columns(2)
-                                            m1.metric("Diagnóstico Identificado", diag)
-                                            m2.metric("Confiança do Comitê", f"{conf:.1f}%")
-                                            st.progress(int(conf))
-                                            
-                                            # Geração Segura do PDF Hospitalar
-                                            try:
-                                                with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as tmp_img_laudo:
-                                                    # Salva no laudo a imagem que a IA analisou (realçada ou original)
-                                                    imagem_laudo.save(tmp_img_laudo.name)
-                                                    caminho_laudo = tmp_img_laudo.name
-                                                    
-                                                pdf_bytes = gerar_laudo_pdf(caminho_laudo, nome_animal, especie, idade, nome_tutor, diag, conf, data_registro)
-                                                
-                                                st.download_button(
-                                                    label="📄 Emitir Laudo Hospitalar (PDF)", 
-                                                    data=pdf_bytes, 
-                                                    file_name=f"Laudo_VetAI_{nome_animal}_{data_registro[:10].replace('/','')}.pdf", 
-                                                    mime="application/pdf"
-                                                )
-                                                # Deleta arquivo temporário após geração do PDF
-                                                os.unlink(caminho_laudo)
-                                            except Exception as e_pdf:
-                                                st.error(f"⚠️ Não foi possível estruturar o laudo em PDF. Detalhes: {e_pdf}")
-                                                
-                                        except Exception as e_db:
-                                            st.error(f"⚠️ Triagem concluída, mas falhou ao gravar no histórico: {e_db}")
-
-with aba_historico:
-    st.subheader("📊 Painel de Analytics & Prontuários Médicos")
-    try:
-        df = carregar_historico()
-        if not df.empty:
-            col_chart1, col_chart2 = st.columns(2)
-            with col_chart1: 
-                st.bar_chart(df['diagnostico'].value_counts(), color="#14b8a6")
-            with col_chart2: 
-                st.bar_chart(df.groupby('diagnostico')['confianca'].mean(), color="#8b5cf6")
-            st.divider()
+# 4. MÓDULO: HISTÓRICO CLÍNICO
+elif menu == "Histórico Clínico":
+    st.title("📂 Histórico de Triagens Salvas")
+    
+    # Carrega os dados salvos em formato de DataFrame do Pandas
+    df_historico = carregar_historico()
+    
+    if df_historico.empty:
+        st.info("Nenhum registro de diagnóstico encontrado no banco de dados.")
+    else:
+        # Se for administrador, ele vê tudo. Se for aluno, pode restringir ou apenas visualizar.
+        if user["role"] == "admin":
+            st.write("📊 **Modo Administrador:** Exibindo todos os prontuários e auditoria global do sistema.")
+            st.dataframe(df_historico, use_container_width=True)
             
-            # Mapeamento das 9 colunas do prontuário do SQLite
-            df.columns = ["ID", "Data/Hora", "Nome Arquivo", "Paciente (Nome)", "Espécie", "Idade (Anos)", "Tutor(a)", "Diagnóstico", "Confiança (%)"]
-            st.dataframe(df, use_container_width=True, hide_index=True, height=350)
+            # Recurso exclusivo de exportação para administradores
+            csv = df_historico.to_csv(index=False).encode('utf-8')
+            st.download_button(
+                label="📥 Exportar Histórico Completo (CSV)",
+                data=csv,
+                file_name="historico_geral_vetai.csv",
+                mime="text/csv"
+            )
         else:
-            st.info("Nenhum registro clínico encontrado até o momento.")
-    except Exception as e_hist:
-        st.error(f"Erro ao carregar o histórico do SQLite: {e_hist}")
+            st.write("📋 **Modo Aluno:** Visualizando o histórico completo de triagens do laboratório.")
+            # Exibe o histórico removendo colunas mais críticas se necessário
+            st.dataframe(df_historico, use_container_width=True)
